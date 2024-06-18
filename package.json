@@ -12,6 +12,7 @@
   "dependencies": {
     "busboy": "^1.6.0",
     "formidable": "^3.5.1",
+    "mongodb": "^6.7.0",
     "multiparty": "^4.2.3",
     "xml2js": "^0.6.2"
   }

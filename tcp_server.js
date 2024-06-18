@@ -2,6 +2,13 @@ const net = require("net");
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
+const { MongoClient } = require("mongodb");
+const xml2js = require("xml2js");
+
+// MongoDB connection details
+const mongoURL = "mongodb://localhost:27017";
+const dbName = "anpr_data";
+const collectionName = "event_notifications";
 
 // Function to get local IP address
 function getLocalIPAddress() {
@@ -82,8 +89,37 @@ function getBoundary(requestData) {
   return null;
 }
 
+// Parse XML and extract relevant data
+function parseXML(xmlContent) {
+  return new Promise((resolve, reject) => {
+    xml2js.parseString(xmlContent, (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        const event = result.EventNotificationAlert;
+        const anpr = event.ANPR[0];
+        const vehicleInfo = anpr.vehicleInfo[0];
+        const vehicleType = vehicleInfo.vehicleType[0];
+        const vehicleColor = vehicleInfo.color[0];
+        const vehicleSpeed = vehicleInfo.speed[0];
+        const licensePlate = anpr.licensePlate[0];
+
+        resolve({
+          ipAddress: event.ipAddress[0],
+          dateTime: event.dateTime[0],
+          eventType: event.eventType[0],
+          licensePlate,
+          vehicleType,
+          vehicleColor,
+          vehicleSpeed,
+        });
+      }
+    });
+  });
+}
+
 // Handle client connection
-function handleClient(socket) {
+async function handleClient(socket) {
   console.log(`HTTP LISTENER: ${socket.remoteAddress} sending data.`);
 
   let requestData = Buffer.alloc(0);
@@ -92,7 +128,7 @@ function handleClient(socket) {
     requestData = Buffer.concat([requestData, chunk]);
   });
 
-  socket.on("end", () => {
+  socket.on("end", async () => {
     const boundaryString = getBoundary(requestData);
     if (!boundaryString) {
       console.log("Boundary string not found in the request.");
@@ -116,6 +152,23 @@ function handleClient(socket) {
         const filePath = path.join(folderPath, `${Date.now()}.xml`);
         fs.writeFileSync(filePath, xmlContent);
         console.log(`XML: Saved ${filePath}`);
+
+        // Parse XML and save to MongoDB
+        try {
+          const data = await parseXML(xmlContent);
+
+          const client = new MongoClient(mongoURL);
+          await client.connect();
+          const db = client.db(dbName);
+          const collection = db.collection(collectionName);
+
+          await collection.insertOne(data);
+          console.log("XML: Data saved to MongoDB");
+
+          await client.close();
+        } catch (error) {
+          console.error("Error parsing XML and saving to MongoDB:", error);
+        }
       }
     }
 
